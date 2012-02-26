@@ -1,5 +1,5 @@
 (ns mgm7734.util
-;  (:require [clojure.tools.trace :as tr])
+  ;(:use [clojure.tools.trace :only [deftrace]])
   )
 
 (defmacro condl
@@ -93,15 +93,36 @@
             (and (sequential? ~e) (count-bound ~(count pos-pats) <= ~e)
                  (merge-match-maps ~@pos-clauses ~@rest-clauses))) ))
 
+(defn- expand-directive
+  [directive syms sym-to-key]
+  (if-not (and (vector? syms) (every? symbol? syms)) 
+    (throw (IllegalArgumentException. (str directive " must be followed by a vector of symbols"))))
+  (for [s syms] [(sym-to-key s) s]))
+
+(defn- match-map-map
+  [pat expr]
+  (let [e (gensym "e")
+        pat* (mapcat (fn [[k p]]
+                       (case k
+                         keys> (expand-directive 'keys> p #(keyword (name %)))
+                         syms> (expand-directive 'syms> p #(list 'quote %))
+                         strs> (expand-directive 'strs> p str)
+                         [[k p]]))
+                     pat)] 
+    `(let [~e ~expr] 
+       (and (map? ~e) (merge-match-maps
+                        ~@(for [[k p] pat*] `(match-map ~p (get ~e ~k)))) ))))
+
+;(defn make-match-map-key [sym] `'~sym)
+(defn make-match-map-key [sym] (keyword sym))
+
 (defmacro match-map
   "Pattern matching with vars"
   [pat expr]
   (cond
     (= '_        pat)   {}
-    (symbol? pat)       {`'~pat expr}
-    (map?        pat)  (let [e (gensym "e")] 
-                         `(let [~e ~expr] 
-                            (and (map? ~e) (merge-match-maps ~@(for [[k p] pat] `(match-map ~p (get ~e ~k)))) )))
+    (symbol? pat)       {(make-match-map-key pat) expr}
+    (map?        pat)   (match-map-map pat expr)
     (vector?     pat)   (match-map-vec pat expr)    
     (and (sequential? pat) (not= 'quote (first pat))) 
                        `(if ~(concat pat [expr]) {})
