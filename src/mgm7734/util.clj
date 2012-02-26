@@ -43,7 +43,7 @@
                  ~@pos-clauses ~@rest-clauses)) ))
 
 (defmacro match?
-  "Pattern matching test without bindings.  This can be a lot more efficient than match-binds or match-let
+  "Pattern matching test without bindings.  This can be a lot more efficient than match-map or match-let
  pat => {map-pat*} , [pos-pat* rest-pat?] , 'quote-pat, (pred-pat) , #\"re-pat\" , anything-pat , sym-pat or const-pat
  map-pat => key pat ,        matches if expr is a map and pat matches (get expr key)
  pos-pat => pat ,            matches if expr is sequential with values matching every corresponding pat
@@ -52,7 +52,7 @@
  re-pat  =>                  matches strings
  anything-pat => _           equivalent to [but more efficient than] the pattern ((constantly true)) 
  quote-pat  => anything      literal match. 
- sym-pat => symbol ,         is an error! Variables only allowed in match-binds and match-let
+ sym-pat => symbol ,         is an error! Variables only allowed in match-map and match-let
  const-pat => anything else, matches when = expr. Note that the pattern is not evaluated, but the expr is.
 "
   [pat expr]
@@ -69,42 +69,42 @@
     (symbol? pat)       (throw (IllegalArgumentException. (str pat ": naked symbols not allowed (yet)")))
     :else              `(= ~pat ~expr) ))
 
-(defmacro and-match-binds [& mes]
+(defmacro merge-match-maps [& mes]
   (let [step (fn step [mes rs]
                (if (empty? mes) 
-                 (cons 'concat rs)
+                 (cons 'merge rs)
                  (let [r (gensym "r")] 
                    `(if-let [~r ~(first mes)] ~(step (rest mes) (conj rs r))))))]
     (step mes [])) )
 
-(defn- match-binds-vec
+(defn- match-map-vec
   [pat expr]
-  (condl (empty? pat) `(if (= ~pat ~expr) [])
+  (condl (empty? pat) `(if (= ~pat ~expr) {})
          :let [[pos-pats rest-pats] (split-with #(not= '& %) pat)]                              
          (not (#{0 2} (count rest-pats))) 
          (throw (IllegalArgumentException. (str "& must be followed by exact one form, not " 
                                                 rest-pats)))
          :let [e (gensym "e")
-               pos-clauses  (map-indexed (fn [i p] `(match-binds ~p (get ~e ~i))) pos-pats)
+               pos-clauses  (map-indexed (fn [i p] `(match-map ~p (get ~e ~i))) pos-pats)
                rest-clauses (if rest-pats
-                              [`(match-binds ~(second rest-pats) (nthnext ~e ~(count pos-pats)))])]
+                              [`(match-map ~(second rest-pats) (nthnext ~e ~(count pos-pats)))])]
          true
          `(let [~e ~expr] 
             (and (sequential? ~e) (count-bound ~(count pos-pats) <= ~e)
-                 (and-match-binds ~@pos-clauses ~@rest-clauses))) ))
+                 (merge-match-maps ~@pos-clauses ~@rest-clauses))) ))
 
-(defmacro match-binds
+(defmacro match-map
   "Pattern matching with vars"
   [pat expr]
   (cond
-    (= '_        pat)   []
-    (symbol? pat)       `['~pat ~expr]
+    (= '_        pat)   {}
+    (symbol? pat)       {`'~pat expr}
     (map?        pat)  (let [e (gensym "e")] 
                          `(let [~e ~expr] 
-                            (and (map? ~e) (and-match-binds ~@(for [[k p] pat] `(match-binds ~p (get ~e ~k)))) )))
-    (vector?     pat)   (match-binds-vec pat expr)    
+                            (and (map? ~e) (merge-match-maps ~@(for [[k p] pat] `(match-map ~p (get ~e ~k)))) )))
+    (vector?     pat)   (match-map-vec pat expr)    
     (and (sequential? pat) (not= 'quote (first pat))) 
-                       `(if ~(concat pat [expr]) [])
+                       `(if ~(concat pat [expr]) {})
     (instance? java.util.regex.Pattern pat)
-                       `(if (re-matches ~pat ~expr) [])
-    :else              `(if (= ~pat ~expr) []) ))
+                       `(if (re-matches ~pat ~expr) {})
+    :else              `(if (= ~pat ~expr) {}) ))
