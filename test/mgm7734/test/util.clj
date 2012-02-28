@@ -95,3 +95,4 @@
 (is (= :ok (match-case :oh,    (:or :oh  [1 2] )  :ok)))
 (is (= :ok (match-case [1 2],  (:or :oh  [1 2] ) :ok)))
 (is (not (match-case   :no,    (:or :oh  [1 2] ) :ouch)))
+

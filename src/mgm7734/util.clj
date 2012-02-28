@@ -207,17 +207,13 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
     vector?      (parse-vector pat expr)  
     sequential?  (case (first pat)
                    quote {:type :bool, :value `(= ~pat ~expr)}
-                   :or (let [expr* (gensym "e")
-                            children (map #(parse-pat % expr*) (next pat))]
+                   :or (let [v (gensym "e")
+                            children (map #(parse-pat % v) (next pat))]
                         (if (some #(seq (:vars %)) children) 
-                          (throw (IllegalArgumentException. "Variables not allowed in :or patterns"))
-                          {:type :bool, :value (list (set (next pat)) expr)})
-;                   {:type :bool, :value `(let [~expr* ~expr] 
-;                                                ;; more efficient than (or ...) for constants
-;                                                ~(reducer (fn [a b] `(if ~a ~a ~b)) 
-;                                                          (map :value children)))}
-                        )
-                   {:type :bool , :value (concat pat [expr])})  
+                          (throw (IllegalArgumentException. "Variables not allowed in :or patterns")))
+                        {:type :or, :expr expr, :free-var v, :children children } )
+                   ;; (foo..)  => (foo.. expr)
+                   {:type :bool, :value (concat pat [expr])})  
     ;; TODO: (re-pat sym...) to bind groups to vars
     (partial instance? java.util.regex.Pattern)   {:type :bool ,  :value `(re-matches ~pat ~expr)}
     {:type :bool, :value `(= ~pat ~expr)} ))
@@ -228,6 +224,8 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
     (case (:type n)
       :bool  `(if ~ (:value n) ~body)
       :bind  `(let [~(first (:vars n)) ~(:value n)] ~body)
+      :or     `(let [~(:free-var n) ~(:expr n)]
+                 (if (or ~@(map #(eval-node % []) (:children n))) ~body))
       :vector (let [v (:free-var n)]
                 `(let [~v ~(:expr n)]
                    (if (sequential? ~v) 
