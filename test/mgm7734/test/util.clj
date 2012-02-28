@@ -64,7 +64,7 @@
   (is (= 1 cnt)))
 
   (is (= {:a 1, :b 2, :c 3, :d 4, :e 5, :f  6, :g 7} 
-         (match-map {keys> [a b] strs> [c d] syms> [e f] :g g}
+         (match-map {keys [a b] strs [c d] syms [e f] :g g}
                     {:a 1, :b 2, "c" 3, "d" 4, 'e 5, 'f 6, :g 7})))
   )
 
@@ -82,6 +82,16 @@
 
 (is (not   (match-case {:a 1 :b 2},      {:a 2}   true)))
 (is (= :ok (match-case {:a 1 :b 2 :c 3}, {:b 2}   :ok)))
-(is (= [1 2 3 4 5 6 7] (match-case {:a 1,:b 2, "c" 3, "d" 4, 'e 5, 'f 6, :g 7, :h 8}, 
-                                   {keys[a b], strs[c d], syms[e f] :g g}
-                                   [a b c d e f g])))
+(is (= [1 2 3 4 5 6 7] 
+       (match-case {:a 1,:b 2,  "c" 3, "d" 4,  'e 5, 'f 6, :g 7, :h 8 :i 9}, 
+                   {keys[a b],  strs[c d],     syms[e f]   :g g :h (even?)}
+                   [a b c d e f g])))
+
+(is (= :ok (match-case "Hello, world!", #"H.*!" :ok)))
+(is (not   (match-case "Hello, world!", #"H.*X" :ok)))
+
+(is (= :ok (match-case '(this is literal), '(this is literal) :ok )))
+
+(is (= :ok (match-case :oh,    (:or :oh  [1 2] )  :ok)))
+(is (= :ok (match-case [1 2],  (:or :oh  [1 2] ) :ok)))
+(is (not (match-case   :no,    (:or :oh  [1 2] ) :ouch)))

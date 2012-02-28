@@ -170,9 +170,9 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
     
     :let [pat* (mapcat (fn [[k p]]
                          (case k
-                           keys> (expand-directive 'keys> p #(keyword (name %)))
-                           syms> (expand-directive 'syms> p #(list 'quote %))
-                           strs> (expand-directive 'strs> p str)
+                           keys (expand-directive 'keys p #(keyword (name %)))
+                           syms (expand-directive 'syms p #(list 'quote %))
+                           strs (expand-directive 'strs p str)
                            [[k p]]))
                        map-pat)
           fresh-sym (gensym "e")
@@ -207,15 +207,16 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
     vector?      (parse-vector pat expr)  
     sequential?  (case (first pat)
                    quote {:type :bool, :value `(= ~pat ~expr)}
-                   :| (let [expr* (gensym "e")
-                            pat* (filter (partial not= '|) pat)
+                   :or (let [expr* (gensym "e")
                             children (map #(parse-pat % expr*) (next pat))]
-                        (if (some #(not= [(:type %) (:vars %)] [:bool []]) children) 
-                          (throw (IllegalArgumentException. "Variables not allowed in :| exprs")))
-                        {:type :bool, :value `(let [~expr* ~expr] 
-                                                ;; more efficient than (or ...) for constants
-                                                ~(reducer (fn [a b] `(if ~a ~a ~b)) 
-                                                          (map :value children)))})
+                        (if (some #(seq (:vars %)) children) 
+                          (throw (IllegalArgumentException. "Variables not allowed in :or patterns"))
+                          {:type :bool, :value (list (set (next pat)) expr)})
+;                   {:type :bool, :value `(let [~expr* ~expr] 
+;                                                ;; more efficient than (or ...) for constants
+;                                                ~(reducer (fn [a b] `(if ~a ~a ~b)) 
+;                                                          (map :value children)))}
+                        )
                    {:type :bool , :value (concat pat [expr])})  
     ;; TODO: (re-pat sym...) to bind groups to vars
     (partial instance? java.util.regex.Pattern)   {:type :bool ,  :value `(re-matches ~pat ~expr)}
@@ -225,7 +226,7 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
   (let [reduce-step (fn [pos-node inner-result]
                       (eval-node pos-node inner-result) )]
     (case (:type n)
-      :bool  `(if ~(:value n) ~body)
+      :bool  `(if ~ (:value n) ~body)
       :bind  `(let [~(first (:vars n)) ~(:value n)] ~body)
       :vector (let [v (:free-var n)]
                 `(let [~v ~(:expr n)]
