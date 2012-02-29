@@ -161,6 +161,11 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
      (let [~x (gensym)]
        (list 'let [~x ~e] ~fx))))
 
+(defmacro fast-or
+  ([] nil)
+  ([x]  x)
+  ([x & xs] `(if ~x true (fast-or ~@xs))))
+
 (declare parse-pat)
 
 (defn- parse-map
@@ -222,7 +227,7 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
   (let [reduce-step (fn [pos-node inner-result]
                       (eval-node pos-node inner-result) )]
     (case (:type n)
-      :bool  `(if ~ (:value n) ~body)
+      :bool  `(if ~(:value n) ~body)
       :bind  `(let [~(first (:vars n)) ~(:value n)] ~body)
       :or     `(let [~(:free-var n) ~(:expr n)]
                  (if (or ~@(map #(eval-node % []) (:children n))) ~body))
@@ -241,25 +246,27 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
       :map (let [v (:free-var n)]
              `(let [~v ~(:expr n)]
                 (if (map? ~v)
-                  ~(reducer reduce-step body (:children n)))))
-      )    )
-)
+                  ~(reducer reduce-step body (:children n)) ))) )))
+
+(defn- compile-clauses
+  [expr clauses]
+  (condl
+   (empty? clauses)        nil
+   (empty? (next clauses)) (throw (IllegalArgumentException. "pattern must be followed by a body or guard")
+                                  )
+   :let [[pat body & more-clauses] clauses]
+    true 
+    (if more-clauses
+      `(or ~(eval-node (parse-pat pat expr) [body])
+           ~(compile-clauses expr more-clauses))
+      (eval-node (parse-pat pat expr) [body])) ))
+
 (defmacro match-case
   "Pattern matching with local bindindgs, guards and results"
-  [expr pat & body]
-  `(first ~(eval-node (parse-pat pat expr) [`(do ~@body)]) )
-  
-                                        ;  (cond
-                                        ;    (= '_        pat)   {}
-                                        ;    (symbol? pat)       {(make-match-map-key pat) expr}
-                                        ;    (map?        pat)   (match-map-map pat expr)
-                                        ;    (vector?     pat)   (match-map-vec pat expr)    
-                                        ;    (and (sequential? pat) (not= 'quote (first pat))) 
-                                        ;                       `(if ~(concat pat [expr]) {})
-                                        ;    (instance? java.util.regex.Pattern pat)
-                                        ;                       `(if (re-matches ~pat ~expr) {})
-                                        ;    :else              `(if (= ~pat ~expr) {}) )
-  
-  )
+;  [expr pat body & more]
+  [expr & clauses]
+  `(first ~(compile-clauses expr clauses))
+ 
+)
 
 
