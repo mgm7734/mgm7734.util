@@ -287,13 +287,27 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
 
 (defmacro match-case
   "Pattern matching with local bindindgs, guards and results
-  pat => literal-const , variable ,or re-pat , {map-pat*} , [vec-elm-pat* vec-rem-pat?] , (:or pat*)
-  literal-const => (quote form)
+
   clause => clauses*
   clause => :case? pat result
   result => :then? expr , or guarded-result+
   guarded-result => :if test :then? expr
 
+  pat => {map-pat*} , [pos-pat* rest-pat?] , 'quote-pat, (pred-pat) , #\"re-pat\" , anything-pat , var-pat or const-pat
+  map-pat => key pat ,        matches if expr is a map and pat matches (get expr key).
+  pos-pat => pat ,            matches if expr is sequential with values matching every corresponding pat.
+  rest-pat => & pat ,         matches the rest of a sequential expr.
+  pred-pat => pred args*      matches if (pred arg* expr) is true.
+  re-pat  =>                  matches strings.
+  anything-pat => _      ,    equivalent to [but more efficient than] the pattern ((constantly true)).
+  quote-pat  => any-form ,    literal match. 
+  var-pat => symbol ,         matches anything, and binds to it over the result.
+  const-pat => anything else, matches when = expr. Note that the pattern is not evaluated, but the expr is.
+
+  Note the following differences with regular destructing for maps:
+
+  o the order is swapped so variable is on left:   { var pat }
+  o directives are the bare symbols keys, strs and syms, rather than :keys, :strs and:syms
 "
   [expr & clauses]
   (if (empty? clauses)

@@ -99,3 +99,8 @@
 (is (= :ok (match-case :a,  :b :ouch, :a :ok, :c :ouch)))
 (is (= :ok (match-case :x,  :a :ouch, :x :if false :ouch, :if true :ok)))
 (is (= :ok (match-case :x,  :a :if false :ouch, :x :ok)))
+
+(match-case [1 2], 
+   :case [x] :if (odd? x)  :then "odd singleton",
+             :if (even? x) :then "even singleton"
+   :case [x y] :then "any pair" )
