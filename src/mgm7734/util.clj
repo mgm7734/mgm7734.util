@@ -248,25 +248,60 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
                 (if (map? ~v)
                   ~(reducer reduce-step body (:children n)) ))) )))
 
-(defn- compile-clauses
+(deftrace compile-clause
   [expr clauses]
-  (condl
-   (empty? clauses)        nil
-   (empty? (next clauses)) (throw (IllegalArgumentException. "pattern must be followed by a body or guard")
-                                  )
-   :let [[pat body & more-clauses] clauses]
-    true 
-    (if more-clauses
-      `(or ~(eval-node (parse-pat pat expr) [body])
-           ~(compile-clauses expr more-clauses))
-      (eval-node (parse-pat pat expr) [body])) ))
+    (condl
+      (empty? clauses) [clauses nil]
+
+      :let [[pat & remainder] clauses]
+      (empty? remainder)
+      (throw (IllegalArgumentException. (str "Pattern '" pat "' must be followed by a result or a guard")))
+
+      (not= :if (first remainder))
+      [(next remainder) (eval-node (parse-pat pat expr) [(first remainder)])]
+      
+      :let [[remainder guards]
+            (loop [remainder remainder, guards []]   
+              (tracer "loop" [remainder guards]) 
+              (condl
+                (or (empty? remainder) (not= :if (first remainder)))
+                [remainder guards]
+
+                (count-bound 3 > remainder) 
+                (throw (IllegalArgumentException. (str "expected (:if test result), got " remainder)))
+		        
+                :otherwise
+                (recur (nthnext remainder 3) (conj guards [(nth remainder 1) (nth remainder 2)]) )))            
+            compiled-guard
+            (reducer (fn [[test result] inner]
+                       (if (nil? inner)
+                         `(if ~test [~result])
+                         `(if ~test [~result] ~inner))
+                       )
+                     nil
+                     guards)]
+      :in
+      [remainder (eval-node (parse-pat pat expr) compiled-guard)]   ))
+      
+              
 
 (defmacro match-case
-  "Pattern matching with local bindindgs, guards and results"
-;  [expr pat body & more]
+  "Pattern matching with local bindindgs, guards and results
+  pat => literal-const , variable ,or re-pat , {map-pat*} , [vec-elm-pat* vec-rem-pat?] , (:or pat*)
+  literal-const => (quote form)
+  clause => clauses*
+  clause => :case? pat result
+  result => :then? expr , or guarded-result+
+  guarded-result => :if test :then? expr
+
+"
   [expr & clauses]
-  `(first ~(compile-clauses expr clauses))
- 
-)
+  (if (empty? clauses)
+    nil
+    `(first (or ~@(loop [clauses clauses, results []] 
+             (if (seq clauses)
+               (let [[clauses*, result] (compile-clause expr clauses)]
+                 (recur clauses* (conj results result)) )
+               results)))) ))
 
 
