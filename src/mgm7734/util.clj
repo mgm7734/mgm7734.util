@@ -12,7 +12,7 @@
       `(if ~a ~b (condl ~@body)))))
 
 (defn reducer
-  ""
+  "reduce from right to left. "
   ([f coll]
     (if-let [[x & xs] (seq coll)]
       (if xs

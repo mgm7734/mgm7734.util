@@ -1,0 +1,16 @@
+# mgm7734.util
+
+Misc. utility functions and macros, such as:
+
+  condl, match-case, reducer 
+
+## Usage
+
+(use 'mgm7734.util)
+
+
+## License
+
+Copyright (C) 2012 FIXME
+
+Distributed under the Eclipse Public License, the same as Clojure.
