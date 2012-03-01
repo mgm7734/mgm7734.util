@@ -39,76 +39,7 @@
             :else (recur (dec n) (next xs))))
     ))
 
-;;;================ match?
-
-(defn- match-vec
-  [pat expr]
-  (condl (empty? pat) `(= ~pat ~expr)
-         :let [[pos-pats rest-pats] (split-with #(not= '& %) pat)]                              
-         (not (#{0 2} (count rest-pats))) 
-         (throw (IllegalArgumentException. (str "& must be followed by exact one form, not " 
-                                                rest-pats)))
-         :let [e (gensym "e")
-               pos-clauses  (map-indexed (fn [i p] `(match? ~p (get ~e ~i))) pos-pats)
-               rest-clauses (if rest-pats
-                              [`(match? ~(second rest-pats) (nthnext ~e ~(count pos-pats)))])]
-         true
-         `(let [~e ~expr] 
-            (and (sequential? ~e) (count-bound ~(count pos-pats) <= ~e)
-                 ~@pos-clauses ~@rest-clauses)) ))
-
-(defmacro match?
-  "Pattern matching test without bindings.  This can be a lot more efficient than match-map or match-let
- pat => {map-pat*} , [pos-pat* rest-pat?] , 'quote-pat, (pred-pat) , #\"re-pat\" , anything-pat , var-pat or const-pat
- map-pat => key pat ,        matches if expr is a map and pat matches (get expr key)
- pos-pat => pat ,            matches if expr is sequential with values matching every corresponding pat
- rest-pat => & pat ,         matches the rest of a sequential expr
- pred-pat => pred args*      matches if (pred arg* expr) is true
- re-pat  =>                  matches strings
- anything-pat => _      ,    equivalent to [but more efficient than] the pattern ((constantly true)) 
- quote-pat  => anything ,    literal match. 
- var-pat => symbol ,         is an error! Variables only allowed in match-map and match-let
- const-pat => anything else, matches when = expr. Note that the pattern is not evaluated, but the expr is.
-"
-  [pat expr]
-  (cond
-    (map?        pat)  (let [e (gensym "e")] 
-                         `(let [~e ~expr] 
-                            (and (map? ~e) ~@(for [[k p] pat] `(match? ~p (get ~e ~k))) )))
-    (vector?     pat)   (match-vec pat expr)    
-    (and (sequential? pat) (not= 'quote (first pat))) 
-                       (concat pat [expr])
-    (= '_       pat)   true
-    (instance? java.util.regex.Pattern pat)
-                       `(re-matches ~pat ~expr)
-    (symbol? pat)       (throw (IllegalArgumentException. (str pat ": naked symbols not allowed (yet)")))
-    :else              `(= ~pat ~expr) ))
-
-;;; =============== match-map
-
-(defmacro merge-match-maps [& mes]
-  (let [step (fn step [mes rs]
-               (if (empty? mes) 
-                 (cons 'merge rs)
-                 (let [r (gensym "r")] 
-                   `(if-let [~r ~(first mes)] ~(step (next mes) (conj rs r))))))]
-    (step mes [])) )
-
-(defn- match-map-vec
-  [pat expr]
-  (condl (empty? pat) `(if (= ~pat ~expr) {})
-         :let [[pos-pats rest-pats] (split-with #(not= '& %) pat)]                              
-         (not (#{0 2} (count rest-pats))) 
-         (throw (IllegalArgumentException. (str "& must be followed by exact one form, not " 
-                                                rest-pats)))
-         :let [e (gensym "e")
-               pos-clauses  (map-indexed (fn [i p] `(match-map ~p (get ~e ~i))) pos-pats)
-               rest-clauses (if rest-pats
-                              [`(match-map ~(second rest-pats) (nthnext ~e ~(count pos-pats)))])]
-         true
-         `(let [~e ~expr] 
-            (and (sequential? ~e) (count-bound ~(count pos-pats) <= ~e)
-                 (merge-match-maps ~@pos-clauses ~@rest-clauses))) ))
+;;;==================== match-case
 
 (defn- expand-directive
   [directive syms sym-to-key]
@@ -130,24 +61,6 @@
        (and (map? ~e) (merge-match-maps
                         ~@(for [[k p] pat*] `(match-map ~p (get ~e ~k)))) ))))
 
-;(defn make-match-map-key [sym] `'~sym)
-(defn make-match-map-key [sym] (keyword sym))
-
-(defmacro match-map
-  "Pattern matching with vars yielding a map of var values"
-  [pat expr]
-  (cond
-    (= '_        pat)   {}
-    (symbol? pat)       {(make-match-map-key pat) expr}
-    (map?        pat)   (match-map-map pat expr)
-    (vector?     pat)   (match-map-vec pat expr)    
-    (and (sequential? pat) (not= 'quote (first pat))) 
-                       `(if ~(concat pat [expr]) {})
-    (instance? java.util.regex.Pattern pat)
-                       `(if (re-matches ~pat ~expr) {})
-    :else              `(if (= ~pat ~expr) {}) ))
-
-;;;==================== match-case
 
 (defmacro with-fresh-var 
   "Given (with-fresh-var x e `(foo ~x)) is (let [x (gensym)] `(let [~x ~e] (foo ~x))) except
@@ -248,7 +161,7 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
                 (if (map? ~v)
                   ~(reducer reduce-step body (:children n)) ))) )))
 
-(deftrace compile-clause
+(defn- compile-clause
   [expr clauses]
     (condl
       (empty? clauses) [clauses nil]
@@ -262,7 +175,6 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
       
       :let [[remainder guards]
             (loop [remainder remainder, guards []]   
-              (tracer "loop" [remainder guards]) 
               (condl
                 (or (empty? remainder) (not= :if (first remainder)))
                 [remainder guards]
@@ -308,14 +220,17 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
 
   o the order is swapped so variable is on left:   { var pat }
   o directives are the bare symbols keys, strs and syms, rather than :keys, :strs and:syms
+
+  :case and :then keywords are optional punctuation which might made code easier to read in some cases.  However,
+  I haven't implement it.
 "
   [expr & clauses]
   (if (empty? clauses)
     nil
-    `(first (or ~@(loop [clauses clauses, results []] 
+    (let [e (gensym "e")] `(first (let [~e ~expr] (or ~@(loop [clauses clauses, results []] 
              (if (seq clauses)
-               (let [[clauses*, result] (compile-clause expr clauses)]
+               (let [[clauses*, result] (compile-clause e clauses)]
                  (recur clauses* (conj results result)) )
-               results)))) ))
+               results)))))) ))
 
 
