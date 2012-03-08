@@ -47,8 +47,12 @@
 (is (= :ok (match-case :x,  :a :ouch, :x :if false :ouch, :if true :ok)))
 (is (= :ok (match-case :x,  :a :if false :ouch, :x :ok)))
 
+
+; sugar?
 ;(match-case [1 2], 
 ;   :case [x] :if (odd? x)  :then "odd singleton",
 ;             :if (even? x) :then "even singleton"
 ;   :case [x y] :then "any pair" )
+(is (let [x 5] (match-case [5 :ok]  [(:val x) :ok] true)))
+(is (let [x 5] (match-case [6 :ok], [(:val x) :ok] false, x true)))
   )

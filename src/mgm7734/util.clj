@@ -2,6 +2,10 @@
   (:use [clojure.tools.trace :only [deftrace tracer trace]])
   )
 
+(defn just [x] (list x))
+(def none      nil)
+(defmacro mget [mx default] (list 'if mx (first mx)) default)
+
 (defmacro condl
   "Cond plus :let bindings"
   ([] nil)
@@ -10,6 +14,22 @@
     (if (= a :let)
       `(let ~b (condl ~@body))
       `(if ~a ~b (condl ~@body)))))
+
+(defmacro letf
+  "clauses => bind* if-section* otherwise-section? ,or bind* :in 
+
+match-case could be replaced by destructuring with tests
+
+
+(vector? x)  (let [[h & t] x]...blah)   vs.s (match-case x [h & t].. blah)
+
+  letf var val ... :if test ...var val... :andif test... var val...:then/:in result
+
+  Example:
+  (letf x 1, {keys: [y]}  (foo bar), :if (even? y), z (blah),..,:andif test, ....,:in z
+
+"
+  [& clauses])
 
 (defn reducer
   "reduce from right to left. "
@@ -125,11 +145,18 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
     vector?      (parse-vector pat expr)  
     sequential?  (case (first pat)
                    quote {:type :bool, :value `(= ~pat ~expr)}
+                   
+                   :val (if (= (count pat) 2)
+                          {:type :bool, :value `(= ~expr (eval ~(second pat)))}
+                          (throw (IllegalArgumentException. ":val requires one argument")))
+                   
                    :or (let [v (gensym "e")
                             children (map #(parse-pat % v) (next pat))]
                         (if (some #(seq (:vars %)) children) 
                           (throw (IllegalArgumentException. "Variables not allowed in :or patterns")))
                         {:type :or, :expr expr, :free-var v, :children children } )
+                   
+                   (fn fn*) {:type :bool, :value `(~pat ~expr)}
                    ;; (foo..)  => (foo.. expr)
                    {:type :bool, :value (concat pat [expr])})  
     ;; TODO: (re-pat sym...) to bind groups to vars
@@ -205,11 +232,15 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
   result => :then? expr , or guarded-result+
   guarded-result => :if test :then? expr
 
-  pat => {map-pat*} , [pos-pat* rest-pat?] , 'quote-pat, (pred-pat) , #\"re-pat\" , anything-pat , var-pat or const-pat
+  pat => {map-pat*} , [pos-pat* rest-pat?] , 'quote-pat, (pred) , (fn [arg] test-body) , (:val expr)
+         (:or pat+) , #\"re-pat\" , anything-pat ,   var-pat or const-pat
   map-pat => key pat ,        matches if expr is a map and pat matches (get expr key).
   pos-pat => pat ,            matches if expr is sequential with values matching every corresponding pat.
   rest-pat => & pat ,         matches the rest of a sequential expr.
+  seq-pat => quote quote-pat ,or pred-pat ,or pred-fn-pat ,or :val v
   pred-pat => pred args*      matches if (pred arg* expr) is true.
+  pred-fn-pat => fn [x] body* is shorthand for pred-pat ((fn[x] body*)), i.e. applies the predicate
+  
   re-pat  =>                  matches strings.
   anything-pat => _      ,    equivalent to [but more efficient than] the pattern ((constantly true)).
   quote-pat  => any-form ,    literal match. 
@@ -222,15 +253,16 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
   o directives are the bare symbols keys, strs and syms, rather than :keys, :strs and:syms
 
   :case and :then keywords are optional punctuation which might made code easier to read in some cases.  However,
-  I haven't implement it.
+  I haven't implemented it.
 "
   [expr & clauses]
   (if (empty? clauses)
     nil
-    (let [e (gensym "e")] `(first (let [~e ~expr] (or ~@(loop [clauses clauses, results []] 
-             (if (seq clauses)
-               (let [[clauses*, result] (compile-clause e clauses)]
-                 (recur clauses* (conj results result)) )
-               results)))))) ))
-
+    (let [e (gensym "e")]
+      `(first (let [~e ~expr]
+                (or ~@(loop [clauses clauses, results []] 
+                        (if (seq clauses)
+                          (let [[clauses*, result] (compile-clause e clauses)]
+                            (recur clauses* (conj results result)) )
+                          results)))))) ))
 
