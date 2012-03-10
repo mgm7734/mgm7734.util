@@ -2,9 +2,10 @@
   (:use [clojure.tools.trace :only [deftrace tracer trace]])
   )
 
+(defn maybe [x] (if x [x]))
 (defn just [x] (list x))
 (def none      nil)
-(defmacro mget [mx default] (list 'if mx (first mx)) default)
+(defmacro mget [mx default] `(let [mx# mx] (if mx# mx# default)))
 
 (defmacro condl
   "Cond plus :let bindings"
@@ -14,22 +15,6 @@
     (if (= a :let)
       `(let ~b (condl ~@body))
       `(if ~a ~b (condl ~@body)))))
-
-(defmacro letf
-  "clauses => bind* if-section* otherwise-section? ,or bind* :in 
-
-match-case could be replaced by destructuring with tests
-
-
-(vector? x)  (let [[h & t] x]...blah)   vs.s (match-case x [h & t].. blah)
-
-  letf var val ... :if test ...var val... :andif test... var val...:then/:in result
-
-  Example:
-  (letf x 1, {keys: [y]}  (foo bar), :if (even? y), z (blah),..,:andif test, ....,:in z
-
-"
-  [& clauses])
 
 (defn reducer
   "reduce from right to left. "
@@ -49,13 +34,14 @@ match-case could be replaced by destructuring with tests
   "A predicate on the length of x that is safe for infinite x.
   A lazy version of (cmp n (length x))"
   [n cmp x]
-  (if (< n 0)
-    (if (seq x)
-      (cmp n 1)
-      (cmp n 0))
-    (loop [n n, xs (seq x)]
-      (cond (nil? xs) (cmp n 0)
-            (== 0 n)  (cmp 0 1)
+  (cond  
+    (counted? x) (cmp n (count x))
+    (< n 0) (if (seq x)
+              (cmp n 1)
+              (cmp n 0))   
+    true  (loop [n n, xs (seq x)]
+            (cond (nil? xs) (cmp n 0)
+                  (== 0 n)  (cmp 0 1)
             :else (recur (dec n) (next xs))))
     ))
 
@@ -104,7 +90,7 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
 (defn- parse-map
   [map-pat expr]
   (condl
-    (empty? map-pat)  {:type :bool, :value (with-fresh-var e expr `(and (map? ~e) (empty? ~e)))}
+    (empty? map-pat)  {:type :bool, :value (with-fresh-var v expr `(and (map? ~v) (empty? ~v)))}
     
     :let [pat* (mapcat (fn [[k p]]
                          (case k
@@ -156,14 +142,19 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
                           (throw (IllegalArgumentException. "Variables not allowed in :or patterns")))
                         {:type :or, :expr expr, :free-var v, :children children } )
                    
+                   :as (if (= 3 (count pat))
+                         {:type :as,  :var (nth pat 2), :value expr :child (parse-pat (nth pat 1) (nth pat 2))}
+                         (throw (IllegalArgumentException. (str "expected (:as pattern var), got: " pat))))
+                   
                    (fn fn*) {:type :bool, :value `(~pat ~expr)}
                    ;; (foo..)  => (foo.. expr)
                    {:type :bool, :value (concat pat [expr])})  
-    ;; TODO: (re-pat sym...) to bind groups to vars
     (partial instance? java.util.regex.Pattern)   {:type :bool ,  :value `(re-matches ~pat ~expr)}
     {:type :bool, :value `(= ~pat ~expr)} ))
 
-(defn- eval-node [n body]
+(defn- eval-node
+  "n is compiled pattern, Return expr that evals n and if true, evals body else nil"
+  [n body]
   (let [reduce-step (fn [pos-node inner-result]
                       (eval-node pos-node inner-result) )]
     (case (:type n)
@@ -171,6 +162,8 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
       :bind  `(let [~(first (:vars n)) ~(:value n)] ~body)
       :or     `(let [~(:free-var n) ~(:expr n)]
                  (if (or ~@(map #(eval-node % []) (:children n))) ~body))
+      ;; pat
+      :as     `(let [~(:var n) ~(:value n)] ~(eval-node (:child n) body))
       :vector (let [v (:free-var n)]
                 `(let [~v ~(:expr n)]
                    (if (sequential? ~v) 
@@ -246,6 +239,32 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
   quote-pat  => any-form ,    literal match. 
   var-pat => symbol ,         matches anything, and binds to it over the result.
   const-pat => anything else, matches when = expr. Note that the pattern is not evaluated, but the expr is.
+
+Example of everything:
+
+ (match-case x  pat-w-result          'any-expr,
+                pat-w-guarded-results :if (foo x) 'guarded-result,
+                ; example of all pats
+                                      :if (bar x) 'gr2,
+                [ :a \"b\"         ; simple = match
+                  3                ; simple == match
+                  'any-form        ; simple= match    
+                  _        ; anything
+                  asym     ; anything, binding asym to match in result exprs
+                  #\"re\"  ; what you'd expect
+                  [x & xs :as y]
+                  {:a av, keys [b c], syms [d], strs [c], :as m}
+                  (:or p1 p2)
+                  (:val expr)      ; = match with expr evaluated
+                  (pred)           ; matches x if (pred x)
+                  #(foo %)         ; matches x if (#(foo %) x) [same as ((foo %))]
+                  (fn [y] (foo y)) ; same as above
+                ] \"result\")
+                
+
+  TODO sets => match some,  first for sequential
+  TODO :as pats
+  TODO: (re-pat sym...) to bind groups to vars
 
   Note the following differences with regular destructing for maps:
 
