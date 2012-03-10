@@ -55,4 +55,12 @@
 ;   :case [x y] :then "any pair" )
 (is (let [x 5] (match-case [5 :ok]  [(:val x) :ok] true)))
 (is (let [x 5] (match-case [6 :ok], [(:val x) :ok] false, x true)))
+
+(is (= [:ok] (match-case [:ok] (:as [_] x) x)))
+(is (= [:ok] (match-case [:ok] [:ok :as x] x)))
+(is (= {:a :ok, :b :good} (match-case {:a :ok, :b :good} {:a _, :as x} x)))
   )
+
+;(is (=  ["you" "yow"] (match-case "Did you say 'yow'?",
+;                                  (#".*(y\S*).*'(.*)'.*" a b)
+;                                  [a b])))

@@ -92,6 +92,8 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
   (condl
     (empty? map-pat)  {:type :bool, :value (with-fresh-var v expr `(and (map? ~v) (empty? ~v)))}
     
+    (:as map-pat)   (parse-pat (list :as (dissoc map-pat :as) (:as map-pat)) expr)
+    
     :let [pat* (mapcat (fn [[k p]]
                          (case k
                            keys (expand-directive 'keys p #(keyword (name %)))
@@ -110,6 +112,9 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
   [vec-pat expr]
   (condl
     (empty? vec-pat) {:type :bool, :value (list '= vec-pat expr)}
+    
+    (= :as (last (butlast vec-pat))) (parse-pat `(:as ~(vec (drop-last 2 vec-pat)) ~(last vec-pat))
+                                                expr)
     
     :let [[pos-pats rest-pats] (split-with #(not= '& %) vec-pat)]                              
     (not (#{0 2} (count rest-pats))) 
@@ -147,6 +152,8 @@ otherwise evalutes fx with x = a fresh symbol bound to e.  Prevents e from being
                          (throw (IllegalArgumentException. (str "expected (:as pattern var), got: " pat))))
                    
                    (fn fn*) {:type :bool, :value `(~pat ~expr)}
+                   
+                   ;; otherwise
                    ;; (foo..)  => (foo.. expr)
                    {:type :bool, :value (concat pat [expr])})  
     (partial instance? java.util.regex.Pattern)   {:type :bool ,  :value `(re-matches ~pat ~expr)}
